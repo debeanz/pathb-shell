@@ -28,6 +28,11 @@ jobs:
           # the secret is pasted by hand on Windows: drop CRs, stray indentation and blank lines before using it
           k="$RUNNER_TEMP/export_key"
           printf '%s\n' "$KEY" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^$/d' > "$k"
+          # a paste that lost the fixed BEGIN/END lines still holds the whole key body: put the markers back
+          if ! grep -q 'BEGIN OPENSSH PRIVATE KEY' "$k"; then
+            { echo '-----BEGIN OPENSSH PRIVATE KEY-----'; grep -v 'OPENSSH PRIVATE KEY' "$k"; echo '-----END OPENSSH PRIVATE KEY-----'; } > "$k.fixed"
+            mv "$k.fixed" "$k"
+          fi
           chmod 600 "$k"
           if ! ssh-keygen -y -f "$k" > /dev/null 2>&1; then
             echo "::error::PATHB_EXPORT_KEY is not a usable private key ($(wc -l < "$k") lines, BEGIN marker: $(grep -c 'BEGIN OPENSSH PRIVATE KEY' "$k"), END marker: $(grep -c 'END OPENSSH PRIVATE KEY' "$k"))"
