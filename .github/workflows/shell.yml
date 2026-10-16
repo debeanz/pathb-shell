@@ -1,0 +1,78 @@
+# Path B shell: unsigned iOS IPA (Unity 6000.3.10 + HybridCLR, no game code or data).
+# The Unity Xcode export is private (it contains Unity's own files); only the finished app is published.
+name: Build shell IPA
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: shell-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export commit
+        id: ref
+        run: echo "sha=$(tr -d '[:space:]' < export.txt)" >> "$GITHUB_OUTPUT"
+      - name: Fetch the shell export (private)
+        uses: actions/checkout@v4
+        with:
+          repository: debeanz/gk2-ios-build
+          ref: ${{ steps.ref.outputs.sha }}
+          ssh-key: ${{ secrets.PATHB_EXPORT_KEY }}
+          persist-credentials: false
+          path: src
+      - name: Select newest Xcode
+        run: |
+          X=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+      - name: Rejoin Unity engine library
+        run: |
+          set -e
+          cd src/xcode/Libraries
+          cat libiPhone-lib.a.part* > libiPhone-lib.a
+          shasum -a 256 -c libiPhone-lib.a.sha256
+          rm libiPhone-lib.a.part*
+      - name: Xcode archive (no code signing)
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/build"
+          cd src/xcode
+          if ! xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone -configuration Release \
+               -sdk iphoneos -destination 'generic/platform=iOS' \
+               -archivePath "$RUNNER_TEMP/build/PathB.xcarchive" \
+               CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+               ENABLE_BITCODE=NO DEBUG_INFORMATION_FORMAT=dwarf \
+               archive > "$RUNNER_TEMP/build/xcodebuild.log" 2>&1; then
+            # message lines only: the full log quotes Unity's sources, which stay private
+            grep -E "error:|fatal error|Undefined symbols|ld: |il2cpp failed|BUILD FAILED|ARCHIVE FAILED" "$RUNNER_TEMP/build/xcodebuild.log" | head -120
+            exit 1
+          fi
+          grep -E "ARCHIVE SUCCEEDED|BUILD SUCCEEDED" "$RUNNER_TEMP/build/xcodebuild.log" | tail -2
+      - name: Package unsigned IPA
+        run: |
+          set -e
+          cd "$RUNNER_TEMP/build"
+          rm -rf Payload && mkdir Payload
+          cp -R PathB.xcarchive/Products/Applications/*.app Payload/
+          zip -qry PathB-shell-unsigned.ipa Payload
+          ls -lh PathB-shell-unsigned.ipa
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPORT_SHA: ${{ steps.ref.outputs.sha }}
+        run: |
+          tag="shell-${EXPORT_SHA::7}"
+          ipa="$RUNNER_TEMP/build/PathB-shell-unsigned.ipa"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$ipa" --clobber
+          else
+            gh release create "$tag" "$ipa" --title "Path B shell $tag" \
+              --notes "Unsigned shell IPA: Unity 6000.3.10 player + HybridCLR interpreter (MIT, Code Philosophy). Contains no game code or data; the Windows tool adds the player's own game files."
+          fi
