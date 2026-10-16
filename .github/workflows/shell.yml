@@ -20,13 +20,27 @@ jobs:
         id: ref
         run: echo "sha=$(tr -d '[:space:]' < export.txt)" >> "$GITHUB_OUTPUT"
       - name: Fetch the shell export (private)
-        uses: actions/checkout@v4
-        with:
-          repository: debeanz/gk2-ios-build
-          ref: ${{ steps.ref.outputs.sha }}
-          ssh-key: ${{ secrets.PATHB_EXPORT_KEY }}
-          persist-credentials: false
-          path: src
+        env:
+          KEY: ${{ secrets.PATHB_EXPORT_KEY }}
+          SHA: ${{ steps.ref.outputs.sha }}
+        run: |
+          set -e
+          # the secret is pasted by hand on Windows: drop CRs, stray indentation and blank lines before using it
+          k="$RUNNER_TEMP/export_key"
+          printf '%s\n' "$KEY" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^$/d' > "$k"
+          chmod 600 "$k"
+          if ! ssh-keygen -y -f "$k" > /dev/null 2>&1; then
+            echo "::error::PATHB_EXPORT_KEY is not a usable private key ($(wc -l < "$k") lines, BEGIN marker: $(grep -c 'BEGIN OPENSSH PRIVATE KEY' "$k"), END marker: $(grep -c 'END OPENSSH PRIVATE KEY' "$k"))"
+            exit 1
+          fi
+          export GIT_SSH_COMMAND="ssh -i $k -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git init -q src
+          cd src
+          git remote add origin git@github.com:debeanz/gk2-ios-build.git
+          git -c protocol.version=2 fetch -q --no-tags --depth=1 origin "$SHA"
+          git checkout -q FETCH_HEAD
+          rm -f "$k"
+          git log --oneline -1
       - name: Select newest Xcode
         run: |
           X=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
