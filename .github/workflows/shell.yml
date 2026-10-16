@@ -1,5 +1,6 @@
 # Path B shell: unsigned iOS IPA (Unity 6000.3.10 + HybridCLR, no game code or data).
 # The Unity Xcode export is private (it contains Unity's own files); only the finished app is published.
+# Symbols are kept in the binary (no strip) so on-device crash reports name the native functions.
 name: Build shell IPA
 on:
   push:
@@ -68,6 +69,7 @@ jobs:
                -archivePath "$RUNNER_TEMP/build/PathB.xcarchive" \
                CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
                ENABLE_BITCODE=NO DEBUG_INFORMATION_FORMAT=dwarf \
+               STRIP_INSTALLED_PRODUCT=NO COPY_PHASE_STRIP=NO DEPLOYMENT_POSTPROCESSING=NO STRIP_STYLE=debugging \
                archive > "$RUNNER_TEMP/build/xcodebuild.log" 2>&1; then
             # message lines only: the full log quotes Unity's sources, which stay private
             grep -E "error:|fatal error|Undefined symbols|ld: |il2cpp failed|BUILD FAILED|ARCHIVE FAILED" "$RUNNER_TEMP/build/xcodebuild.log" | head -120
